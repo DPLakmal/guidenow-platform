@@ -1,0 +1,138 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: guidenow-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: guidenow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: guidenow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  guide-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.guide
+    container_name: guidenow-guide
+    environment:
+      GUIDE_PORT: "8081"
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/guidenow?sslmode=disable"
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  matching-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.matching
+    container_name: guidenow-matching
+    environment:
+      MATCHING_PORT: "8082"
+      REDIS_URL: "redis:6379"
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/guidenow?sslmode=disable"
+    ports:
+      - "8082:8082"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  chat-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.chat
+    container_name: guidenow-chat
+    environment:
+      CHAT_PORT: "8083"
+      REDIS_URL: "redis:6379"
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/guidenow?sslmode=disable"
+    ports:
+      - "8083:8083"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ai
+    container_name: guidenow-ai
+    environment:
+      AI_PORT: "8084"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+    ports:
+      - "8084:8084"
+
+  booking-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.booking
+    container_name: guidenow-booking
+    environment:
+      BOOKING_PORT: "8085"
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/guidenow?sslmode=disable"
+    ports:
+      - "8085:8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gateway
+    container_name: guidenow-gateway
+    environment:
+      GATEWAY_PORT: "8080"
+      GUIDE_SERVICE_URL: "http://guide-service:8081"
+      MATCHING_SERVICE_URL: "http://matching-service:8082"
+      CHAT_SERVICE_URL: "http://chat-service:8083"
+      AI_SERVICE_URL: "http://ai-service:8084"
+      BOOKING_SERVICE_URL: "http://booking-service:8085"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - guide-service
+      - matching-service
+      - chat-service
+      - ai-service
+      - booking-service
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    container_name: guidenow-web
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8080"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gateway-service
+
+volumes:
+  postgres_data:
+  redis_data:
